@@ -1,0 +1,863 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>EVACSIM — Fire Evacuation Training</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/aframe/1.4.2/aframe.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@300;400;600;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+:root {
+  --fire: #ff3d00;
+  --fire2: #ff9100;
+  --safe: #00e676;
+  --safe2: #69f0ae;
+  --smoke: rgba(20,12,5,0.85);
+  --panel-bg: rgba(6,3,1,0.92);
+  --border: rgba(255,80,0,0.3);
+  --green-border: rgba(0,230,118,0.35);
+  --text: #fff3e0;
+  --mono: 'Share Tech Mono', monospace;
+  --display: 'Barlow Condensed', sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{overflow:hidden;background:#000;cursor:none}
+
+/* ═══════════ SMOKE / ATMOSPHERE LAYERS ═══════════ */
+#atmo{position:fixed;inset:0;pointer-events:none;z-index:100}
+#vignette{position:absolute;inset:0;background:radial-gradient(ellipse 80% 70% at 50% 50%,transparent 30%,rgba(10,4,1,0.82) 100%)}
+#smoke-top{position:absolute;top:0;left:0;right:0;height:38%;background:linear-gradient(180deg,rgba(18,10,4,0.92) 0%,transparent 100%);animation:smokePulse 3s ease-in-out infinite alternate}
+#smoke-floor{position:absolute;bottom:0;left:0;right:0;height:22%;background:linear-gradient(0deg,rgba(15,8,3,0.75) 0%,transparent 100%)}
+@keyframes smokePulse{0%{opacity:.55}100%{opacity:1}}
+
+/* Heat shimmer — red edges when near fire */
+#heat-left{position:absolute;top:0;left:0;bottom:0;width:28%;background:linear-gradient(90deg,rgba(255,40,0,0.22) 0%,transparent 100%);opacity:0;transition:opacity .3s;pointer-events:none}
+#heat-right{position:absolute;top:0;right:0;bottom:0;width:28%;background:linear-gradient(270deg,rgba(255,40,0,0.22) 0%,transparent 100%);opacity:0;transition:opacity .3s;pointer-events:none}
+#heat-back{position:absolute;bottom:0;left:0;right:0;height:35%;background:linear-gradient(0deg,rgba(255,20,0,0.3) 0%,transparent 100%);animation:heatBack 1.2s ease-in-out infinite alternate;pointer-events:none}
+@keyframes heatBack{0%{opacity:.4}100%{opacity:.9}}
+
+/* Crawl overlay */
+#crawl-overlay{position:absolute;inset:0;background:linear-gradient(0deg,rgba(22,12,4,0.96) 0%,rgba(18,10,4,0.6) 40%,transparent 70%);opacity:0;transition:opacity .5s;pointer-events:none}
+#crawl-overlay.on{opacity:1}
+
+/* Hit flash */
+#hit-flash{position:absolute;inset:0;background:rgba(255,30,0,0.55);opacity:0;pointer-events:none;transition:opacity .08s}
+#hit-flash.on{opacity:1}
+
+/* ═══════════ CONTEXTUAL TIP CARD (centre screen) ═══════════ */
+#tip-card{
+  position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) scale(0.88);
+  z-index:500;width:420px;
+  background:linear-gradient(135deg,rgba(4,2,0,0.97) 0%,rgba(12,6,2,0.97) 100%);
+  border:1px solid rgba(255,90,0,0.55);
+  border-radius:4px;
+  box-shadow:0 0 0 1px rgba(255,60,0,0.12),0 24px 60px rgba(0,0,0,0.8),0 0 40px rgba(255,50,0,0.15);
+  overflow:hidden;opacity:0;pointer-events:none;
+  transition:opacity .35s,transform .35s;
+}
+#tip-card.show{opacity:1;transform:translate(-50%,-50%) scale(1);pointer-events:auto}
+.tc-stripe{height:3px;background:linear-gradient(90deg,var(--fire),var(--fire2),var(--fire));background-size:200% 100%;animation:stripeFlow 1.5s linear infinite}
+@keyframes stripeFlow{0%{background-position:0}100%{background-position:200%}}
+.tc-stripe.green{background:linear-gradient(90deg,var(--safe),var(--safe2),var(--safe));animation:stripeFlowG 1.5s linear infinite}
+@keyframes stripeFlowG{0%{background-position:0}100%{background-position:200%}}
+.tc-body{padding:22px 26px 24px}
+.tc-tag{font:600 10px/1 var(--display);letter-spacing:4px;color:var(--fire);text-transform:uppercase;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.tc-tag::before{content:'';display:block;width:24px;height:1px;background:var(--fire)}
+.tc-tag.green{color:var(--safe)}
+.tc-tag.green::before{background:var(--safe)}
+.tc-icon{font-size:42px;margin-bottom:12px;line-height:1;display:block}
+.tc-title{font:900 32px/1 var(--display);color:#fff;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;text-shadow:0 0 20px rgba(255,80,0,.6)}
+.tc-title.green{text-shadow:0 0 20px rgba(0,230,118,.6)}
+.tc-desc{font:400 14px/1.6 var(--display);color:#ffcfaa;letter-spacing:.3px;margin-bottom:18px}
+.tc-desc.green{color:#b2ffcf}
+.tc-key{display:inline-flex;align-items:center;gap:8px;background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.15);border-radius:3px;padding:6px 14px}
+.tc-key kbd{font:700 13px/1 var(--mono);color:#fff;background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.25);border-radius:3px;padding:4px 10px}
+.tc-key span{font:600 11px/1 var(--display);color:#aaa;letter-spacing:1px}
+.tc-dismiss{font:600 10px/1 var(--display);letter-spacing:3px;color:rgba(255,255,255,0.28);margin-top:14px;text-align:right;font-size:9px}
+
+/* ═══════════ BANNER ═══════════ */
+#banner{
+  position:fixed;top:0;left:0;right:0;z-index:400;
+  background:linear-gradient(90deg,rgba(4,1,0,0.98),rgba(10,4,0,0.98));
+  border-bottom:1px solid rgba(255,60,0,0.3);
+  padding:0 24px;height:52px;
+  display:flex;align-items:center;gap:16px;
+  animation:bannerIn .6s cubic-bezier(.22,1,.36,1) forwards;
+}
+@keyframes bannerIn{from{transform:translateY(-100%);opacity:0}to{transform:translateY(0);opacity:1}}
+.b-dot{width:8px;height:8px;border-radius:50%;background:var(--fire);box-shadow:0 0 8px var(--fire);animation:dotPulse .7s ease-in-out infinite alternate}
+@keyframes dotPulse{0%{opacity:.3;transform:scale(.8)}100%{opacity:1;transform:scale(1.2)}}
+.b-label{font:900 11px/1 var(--display);letter-spacing:5px;color:var(--fire);text-transform:uppercase}
+.b-sep{width:1px;height:20px;background:rgba(255,80,0,0.25)}
+.b-msg{font:600 13px/1 var(--display);letter-spacing:3px;color:#ffd7b0;text-transform:uppercase}
+.b-right{margin-left:auto;display:flex;align-items:center;gap:20px}
+.b-timer-wrap{display:flex;flex-direction:column;align-items:flex-end}
+.b-timer-label{font:600 8px/1 var(--mono);letter-spacing:3px;color:rgba(255,150,80,0.6);margin-bottom:2px}
+#timer-val{font:700 22px/1 var(--mono);color:#ffd060;text-shadow:0 0 12px rgba(255,200,0,0.6)}
+.b-floor{display:flex;flex-direction:column;align-items:center;border-left:1px solid rgba(255,80,0,0.2);padding-left:20px}
+.b-floor-label{font:600 8px/1 var(--mono);letter-spacing:3px;color:rgba(255,150,80,0.5)}
+.b-floor-num{font:900 22px/1 var(--display);color:#fff;letter-spacing:1px}
+
+/* ═══════════ LEFT PANEL ═══════════ */
+#left-panel{
+  position:fixed;left:20px;top:68px;z-index:300;
+  display:flex;flex-direction:column;gap:10px;
+  animation:panelL .7s cubic-bezier(.22,1,.36,1) .2s forwards;opacity:0;
+}
+@keyframes panelL{from{opacity:0;transform:translateX(-30px)}to{opacity:1;transform:translateX(0)}}
+.lp-card{
+  background:var(--panel-bg);border:1px solid var(--border);
+  border-radius:3px;padding:10px 14px;
+  backdrop-filter:blur(10px);
+  box-shadow:0 4px 20px rgba(0,0,0,0.5),inset 0 1px 0 rgba(255,100,0,0.06);
+}
+.lp-label{font:600 8px/1 var(--mono);letter-spacing:3px;color:rgba(255,120,60,0.6);margin-bottom:4px;text-transform:uppercase}
+.lp-value{font:900 32px/1 var(--display);color:#fff;letter-spacing:.5px}
+.lp-sub{font:400 10px/1 var(--display);letter-spacing:2px;color:rgba(255,160,90,0.7);margin-top:2px}
+
+#lift-badge{
+  display:flex;align-items:center;gap:10px;
+  background:rgba(140,0,0,0.88);border:1px solid rgba(255,40,0,0.5);
+  border-radius:3px;padding:10px 14px;
+  box-shadow:0 0 0 1px rgba(255,0,0,0.08),0 0 20px rgba(255,0,0,0.15);
+  animation:liftPulse 2s ease-in-out infinite;
+}
+@keyframes liftPulse{0%,100%{box-shadow:0 0 12px rgba(255,0,0,0.2)}50%{box-shadow:0 0 24px rgba(255,0,0,0.5)}}
+.lb-icon{font-size:22px}
+.lb-text{font:700 11px/1.4 var(--display);letter-spacing:2px;color:#fff;text-transform:uppercase}
+
+/* ═══════════ RIGHT PANEL — tips ═══════════ */
+#right-panel{
+  position:fixed;right:20px;top:68px;z-index:300;width:252px;
+  background:var(--panel-bg);border:1px solid var(--border);
+  border-radius:3px;overflow:hidden;
+  box-shadow:0 4px 24px rgba(0,0,0,0.6),inset 0 1px 0 rgba(255,100,0,0.06);
+  animation:panelR .7s cubic-bezier(.22,1,.36,1) .3s forwards;opacity:0;
+}
+@keyframes panelR{from{opacity:0;transform:translateX(30px)}to{opacity:1;transform:translateX(0)}}
+.rp-head{padding:9px 14px;background:linear-gradient(90deg,rgba(180,30,0,0.4),transparent);border-bottom:1px solid var(--border)}
+.rp-head-title{font:700 9px/1 var(--display);letter-spacing:4px;color:rgba(255,120,60,0.8);text-transform:uppercase}
+.tip-row{display:flex;align-items:flex-start;gap:10px;padding:8px 14px;border-bottom:1px solid rgba(255,60,0,0.08)}
+.tip-row:last-child{border-bottom:none}
+.tip-num{min-width:18px;height:18px;border-radius:2px;background:rgba(255,50,0,0.25);border:1px solid rgba(255,80,0,0.3);display:flex;align-items:center;justify-content:center;font:700 10px/1 var(--mono);color:var(--fire);flex-shrink:0;margin-top:1px}
+.tip-text{font:400 11px/1.55 var(--display);color:rgba(255,200,150,0.85);letter-spacing:.2px}
+.tip-text b{color:#ffba70;font-weight:700}
+
+/* ═══════════ BOTTOM HUD ═══════════ */
+#bottom-hud{
+  position:fixed;bottom:18px;left:50%;transform:translateX(-50%);
+  z-index:300;display:flex;flex-direction:column;align-items:center;gap:8px;
+}
+#dir-indicator{
+  display:flex;align-items:center;gap:10px;
+  background:var(--panel-bg);border:1px solid var(--green-border);
+  border-radius:3px;padding:8px 20px;
+  box-shadow:0 0 20px rgba(0,230,118,0.1);
+}
+.di-arrow{font-size:22px;animation:arrowBounce .8s ease-in-out infinite alternate;filter:drop-shadow(0 0 6px var(--safe))}
+@keyframes arrowBounce{from{transform:translateY(0)}to{transform:translateY(-5px)}}
+#dir-text{font:700 12px/1 var(--display);letter-spacing:4px;color:var(--safe);text-transform:uppercase}
+#ctrl-row{display:flex;gap:8px}
+.ctrl-chip{font:600 10px/1 var(--mono);color:rgba(255,180,100,0.6);background:rgba(255,80,0,0.07);border:1px solid rgba(255,80,0,0.18);border-radius:2px;padding:4px 10px;letter-spacing:1px}
+.ctrl-chip kbd{color:#ffd080}
+
+/* ═══════════ CRAWL STATUS ═══════════ */
+#crawl-status{
+  position:fixed;top:52px;left:0;right:0;z-index:350;
+  background:linear-gradient(90deg,rgba(0,100,40,0.0),rgba(0,80,30,0.25),rgba(0,100,40,0.0));
+  border-bottom:1px solid rgba(0,230,118,0.2);
+  padding:6px 24px;display:flex;align-items:center;gap:12px;
+  opacity:0;transition:opacity .35s;pointer-events:none;
+}
+#crawl-status.on{opacity:1}
+.cs-dot{width:6px;height:6px;border-radius:50%;background:var(--safe);animation:dotPulse .5s ease-in-out infinite alternate}
+.cs-text{font:700 9px/1 var(--display);letter-spacing:4px;color:var(--safe);text-transform:uppercase}
+.cs-sub{font:400 9px/1 var(--display);letter-spacing:2px;color:rgba(0,230,118,0.5);margin-left:auto}
+
+/* ═══════════ PROXIMITY FIRE WARNINGS ═══════════ */
+.prox-warn{
+  position:fixed;z-index:350;
+  display:flex;align-items:center;gap:8px;
+  background:rgba(160,15,0,0.92);border:1px solid rgba(255,60,0,0.5);
+  border-radius:3px;padding:7px 14px;
+  opacity:0;transition:opacity .25s;pointer-events:none;
+  box-shadow:0 0 20px rgba(255,0,0,0.2);
+}
+.prox-warn.on{opacity:1}
+#warn-left{left:20px;top:50%;transform:translateY(-50%)}
+#warn-right{right:20px;top:50%;transform:translateY(-50%)}
+.pw-icon{font-size:18px}
+.pw-text{font:700 10px/1.4 var(--display);letter-spacing:2px;color:#fff;text-transform:uppercase}
+
+/* ═══════════ WIN SCREEN ═══════════ */
+#win{
+  position:fixed;inset:0;z-index:999;
+  background:rgba(0,18,8,0.97);
+  display:none;flex-direction:column;align-items:center;justify-content:center;gap:0;
+  pointer-events:auto;
+}
+.win-stripe{position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,var(--safe),var(--safe2),var(--safe));background-size:200%;animation:stripeFlowG 1.5s linear infinite}
+.win-stripe.b{top:auto;bottom:0}
+#win h1{font:900 72px/1 var(--display);letter-spacing:3px;color:var(--safe);text-transform:uppercase;text-shadow:0 0 40px rgba(0,230,118,0.5);margin-top:24px}
+#win .sub{font:300 16px/1 var(--display);letter-spacing:8px;color:rgba(0,230,118,0.5);text-transform:uppercase;margin-top:8px}
+#win-time{font:700 28px/1 var(--mono);color:#ffd060;margin-top:28px;text-shadow:0 0 12px rgba(255,200,0,0.4)}
+#win-score{font:400 12px/1 var(--display);letter-spacing:3px;color:rgba(255,255,255,0.3);margin-top:6px;text-transform:uppercase}
+#win-btn{
+  margin-top:36px;font:700 12px/1 var(--display);letter-spacing:5px;
+  color:#fff;background:var(--safe);border:none;
+  padding:14px 36px;border-radius:2px;cursor:pointer;
+  text-transform:uppercase;transition:all .2s;
+  box-shadow:0 0 24px rgba(0,230,118,0.3);
+}
+#win-btn:hover{background:var(--safe2);box-shadow:0 0 36px rgba(0,230,118,0.5)}
+
+/* ═══════════ SCANLINE GRAIN OVERLAY ═══════════ */
+#grain{position:fixed;inset:0;z-index:200;pointer-events:none;opacity:.025;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");background-size:128px}
+</style>
+</head>
+<body>
+
+<!-- ═══ A-FRAME SCENE ═══ -->
+<a-scene fog="type:exponential;color:#150900;density:0.038" background="color:#080300" vr-mode-ui="enabled:false" id="scene">
+
+  <!-- PLAYER — starts deep inside, fire is at z=-16 and on sides -->
+  <a-entity id="rig" position="0 0 -11">
+    <a-camera id="cam" look-controls="pointerLockEnabled:true" wasd-controls="enabled:false" fov="84" position="0 1.62 0"></a-camera>
+  </a-entity>
+
+  <!-- ══════════ FLOOR ══════════ -->
+  <a-plane position="0 0 5" rotation="-90 0 0" width="10" height="44"
+    material="color:#1e1008;roughness:.97;metalness:.04"></a-plane>
+  <!-- Subtle floor grid lines -->
+  <a-box position="-3.3 .004 5" width=".04" height=".008" depth="44" material="color:#261505"></a-box>
+  <a-box position="0    .004 5" width=".04" height=".008" depth="44" material="color:#261505"></a-box>
+  <a-box position="3.3  .004 5" width=".04" height=".008" depth="44" material="color:#261505"></a-box>
+  <!-- Cross lines every ~4m -->
+  <a-box position="0 .004 -8"  width="10" height=".008" depth=".04" material="color:#261505"></a-box>
+  <a-box position="0 .004 -4"  width="10" height=".008" depth=".04" material="color:#261505"></a-box>
+  <a-box position="0 .004  0"  width="10" height=".008" depth=".04" material="color:#261505"></a-box>
+  <a-box position="0 .004  4"  width="10" height=".008" depth=".04" material="color:#261505"></a-box>
+  <a-box position="0 .004  8"  width="10" height=".008" depth=".04" material="color:#261505"></a-box>
+  <a-box position="0 .004 12"  width="10" height=".008" depth=".04" material="color:#261505"></a-box>
+
+  <!-- ══════════ CEILING ══════════ -->
+  <a-plane position="0 3.4 5" rotation="90 0 0" width="10" height="44"
+    material="color:#0f0600;roughness:1"></a-plane>
+  <!-- Ceiling beams -->
+  <a-box position="0 3.35 -6"  width="10.2" height=".12" depth=".28" material="color:#1a0c04;roughness:.9"></a-box>
+  <a-box position="0 3.35  0"  width="10.2" height=".12" depth=".28" material="color:#1a0c04;roughness:.9"></a-box>
+  <a-box position="0 3.35  6"  width="10.2" height=".12" depth=".28" material="color:#1a0c04;roughness:.9"></a-box>
+  <a-box position="0 3.35 12"  width="10.2" height=".12" depth=".28" material="color:#1a0c04;roughness:.9"></a-box>
+
+  <!-- ══════════ WALLS ══════════ -->
+  <a-box position="-5 1.7 5"  width=".18" height="3.4" depth="44" material="color:#190c04;roughness:1"></a-box>
+  <a-box position=" 5 1.7 5"  width=".18" height="3.4" depth="44" material="color:#190c04;roughness:1"></a-box>
+  <a-box position="0 1.7 -17" width="10"  height="3.4" depth=".18" material="color:#190c04;roughness:1"></a-box>
+
+  <!-- Wall sconce sockets (decorative) -->
+  <a-box position="-4.85 2.2 -4" width=".05" height=".35" depth=".4" material="color:#2a1608;roughness:.7"></a-box>
+  <a-box position=" 4.85 2.2 -4" width=".05" height=".35" depth=".4" material="color:#2a1608;roughness:.7"></a-box>
+  <a-box position="-4.85 2.2  4" width=".05" height=".35" depth=".4" material="color:#2a1608;roughness:.7"></a-box>
+  <a-box position=" 4.85 2.2  4" width=".05" height=".35" depth=".4" material="color:#2a1608;roughness:.7"></a-box>
+
+  <!-- Emergency strip lights on walls -->
+  <a-box position="-4.88 .8 2"  width=".04" height=".08" depth="22" material="color:#ff4400;emissive:#ff2200;emissiveIntensity:.5" animation="property:material.emissiveIntensity;from:.2;to:1;dur:110;dir:alternate;loop:true"></a-box>
+  <a-box position=" 4.88 .8 2"  width=".04" height=".08" depth="22" material="color:#ff4400;emissive:#ff2200;emissiveIntensity:.5" animation="property:material.emissiveIntensity;from:.1;to:.9;dur:140;dir:alternate;loop:true;delay:55"></a-box>
+
+  <!-- ══════════ FIRE — BACK WALL (z ≈ -16) ══════════ -->
+  <a-entity position="0 0 -16.5">
+    <a-sphere radius="2.8" material="color:#ff1a00;opacity:.08;transparent:true;side:back"
+      animation="property:material.opacity;from:.04;to:.22;dur:280;dir:alternate;loop:true"></a-sphere>
+    <!-- Central big flame -->
+    <a-cone position="0 1.6 0" radius-bottom="1.2" radius-top=".04" height="3.5"
+      material="color:#ff2800;opacity:.96;transparent:true"
+      animation__c="property:material.color;from:#ff1200;to:#ffcc00;dur:145;dir:alternate;loop:true"
+      animation__s="property:scale;from:1 1 1;to:.62 1.5 .62;dur:185;dir:alternate;loop:true"></a-cone>
+    <a-cone position=".85 1.1 .4" radius-bottom=".7" radius-top=".03" height="2.4"
+      material="color:#ff5500;opacity:.9;transparent:true"
+      animation__s="property:scale;from:.9 .9 .9;to:1.35 1.6 1.35;dur:240;dir:alternate;loop:true"></a-cone>
+    <a-cone position="-.7 1.0 -.3" radius-bottom=".6" radius-top=".03" height="2.1"
+      material="color:#ff8800;opacity:.85;transparent:true"
+      animation__s="property:scale;from:1.1 1 1.1;to:.6 1.55 .6;dur:270;dir:alternate;loop:true"></a-cone>
+    <a-cone position=".3  .7  -.6" radius-bottom=".45" radius-top=".02" height="1.6"
+      material="color:#ffaa00;opacity:.75;transparent:true"
+      animation__s="property:scale;from:.85 1 .85;to:1.25 1.4 1.25;dur:220;dir:alternate;loop:true"></a-cone>
+    <a-light type="point" color="#ff4400" intensity="6" distance="20"
+      animation="property:intensity;from:3.5;to:9;dur:200;dir:alternate;loop:true"></a-light>
+  </a-entity>
+
+  <!-- ══════════ FIRE — LEFT WALL GAUNTLET (z = -10 to +8) ══════════ -->
+  <!-- Zone A: z=-10 -->
+  <a-entity position="-4.6 0 -10" id="fire-left-a">
+    <a-cone position="0 .95 0" radius-bottom=".62" radius-top=".03" height="2.1"
+      material="color:#ff3800;opacity:.93;transparent:true"
+      animation__s="property:scale;from:1 1 1;to:.65 1.5 .65;dur:235;dir:alternate;loop:true"></a-cone>
+    <a-cone position=".35 .65 .2" radius-bottom=".38" radius-top=".02" height="1.4"
+      material="color:#ff7700;opacity:.82;transparent:true"
+      animation__s="property:scale;from:.85 .85 .85;to:1.4 1.6 1.4;dur:275;dir:alternate;loop:true"></a-cone>
+    <a-light type="point" color="#ff3300" intensity="2.8" distance="7"
+      animation="property:intensity;from:1.4;to:4.5;dur:255;dir:alternate;loop:true"></a-light>
+  </a-entity>
+  <!-- Zone B: z=-5 -->
+  <a-entity position="-4.6 0 -5" id="fire-left-b">
+    <a-cone position="0 .8 0" radius-bottom=".55" radius-top=".03" height="1.8"
+      material="color:#ff4200;opacity:.9;transparent:true"
+      animation__s="property:scale;from:1 1 1;to:.7 1.4 .7;dur:250;dir:alternate;loop:true"></a-cone>
+    <a-cone position="-.28 .5 -.18" radius-bottom=".32" radius-top=".02" height="1.2"
+      material="color:#ff8800;opacity:.78;transparent:true"
+      animation__s="property:scale;from:.9 .9 .9;to:1.3 1.5 1.3;dur:290;dir:alternate;loop:true"></a-cone>
+    <a-light type="point" color="#ff4400" intensity="2.4" distance="6"
+      animation="property:intensity;from:1.2;to:3.8;dur:270;dir:alternate;loop:true"></a-light>
+  </a-entity>
+  <!-- Zone C: z=0 -->
+  <a-entity position="-4.6 0 0" id="fire-left-c">
+    <a-cone position="0 .9 0" radius-bottom=".6" radius-top=".03" height="2"
+      material="color:#ff3500;opacity:.92;transparent:true"
+      animation__s="property:scale;from:1 1 1;to:.68 1.45 .68;dur:245;dir:alternate;loop:true"></a-cone>
+    <a-light type="point" color="#ff3300" intensity="2.6" distance="6"
+      animation="property:intensity;from:1.3;to:4.2;dur:260;dir:alternate;loop:true"></a-light>
+  </a-entity>
+  <!-- Zone D: z=6 -->
+  <a-entity position="-4.6 0 6" id="fire-left-d">
+    <a-cone position="0 .75 0" radius-bottom=".5" radius-top=".03" height="1.7"
+      material="color:#ff4800;opacity:.88;transparent:true"
+      animation__s="property:scale;from:.95 .95 .95;to:.7 1.42 .7;dur:255;dir:alternate;loop:true"></a-cone>
+    <a-light type="point" color="#ff4400" intensity="2.2" distance="6"
+      animation="property:intensity;from:1;to:3.5;dur:280;dir:alternate;loop:true"></a-light>
+  </a-entity>
+
+  <!-- ══════════ FIRE — RIGHT WALL GAUNTLET (z = -7 to +5) ══════════ -->
+  <!-- Zone A: z=-7 -->
+  <a-entity position="4.6 0 -7" id="fire-right-a">
+    <a-cone position="0 .88 0" radius-bottom=".58" radius-top=".03" height="1.95"
+      material="color:#ff3a00;opacity:.92;transparent:true"
+      animation__s="property:scale;from:1 1 1;to:.67 1.48 .67;dur:242;dir:alternate;loop:true"></a-cone>
+    <a-cone position="-.3 .6 .22" radius-bottom=".36" radius-top=".02" height="1.3"
+      material="color:#ff7200;opacity:.8;transparent:true"
+      animation__s="property:scale;from:.88 .88 .88;to:1.35 1.55 1.35;dur:278;dir:alternate;loop:true"></a-cone>
+    <a-light type="point" color="#ff3800" intensity="2.7" distance="7"
+      animation="property:intensity;from:1.3;to:4.4;dur:248;dir:alternate;loop:true"></a-light>
+  </a-entity>
+  <!-- Zone B: z=-1 -->
+  <a-entity position="4.6 0 -1" id="fire-right-b">
+    <a-cone position="0 .82 0" radius-bottom=".54" radius-top=".03" height="1.85"
+      material="color:#ff4000;opacity:.9;transparent:true"
+      animation__s="property:scale;from:1 1 1;to:.7 1.44 .7;dur:252;dir:alternate;loop:true"></a-cone>
+    <a-light type="point" color="#ff4200" intensity="2.5" distance="6"
+      animation="property:intensity;from:1.2;to:4;dur:265;dir:alternate;loop:true"></a-light>
+  </a-entity>
+  <!-- Zone C: z=5 -->
+  <a-entity position="4.6 0 5" id="fire-right-c">
+    <a-cone position="0 .78 0" radius-bottom=".52" radius-top=".03" height="1.75"
+      material="color:#ff4500;opacity:.88;transparent:true"
+      animation__s="property:scale;from:.96 .96 .96;to:.72 1.42 .72;dur:258;dir:alternate;loop:true"></a-cone>
+    <a-light type="point" color="#ff4400" intensity="2.3" distance="6"
+      animation="property:intensity;from:1.1;to:3.7;dur:272;dir:alternate;loop:true"></a-light>
+  </a-entity>
+
+  <!-- ══════════ SMOKE PARTICLES ══════════ -->
+  <a-entity position="0 3.0 -14">
+    <a-sphere radius="1.4" material="color:#1c1c1c;opacity:.38;transparent:true"
+      animation__p="property:position;from:0 0 0;to:.7 .1 9;dur:4000;loop:true;easing:easeOutQuad"
+      animation__o="property:material.opacity;from:.38;to:0;dur:4000;loop:true"></a-sphere>
+  </a-entity>
+  <a-entity position="-1.4 2.8 -12">
+    <a-sphere radius="1.1" material="color:#181818;opacity:.32;transparent:true"
+      animation__p="property:position;from:0 0 0;to:-.5 .15 10;dur:4800;loop:true;easing:easeOutQuad"
+      animation__o="property:material.opacity;from:.32;to:0;dur:4800;loop:true"></a-sphere>
+  </a-entity>
+  <a-entity position="2.0 2.9 -10">
+    <a-sphere radius=".95" material="color:#221810;opacity:.28;transparent:true"
+      animation__p="property:position;from:0 0 0;to:1.1 .18 11;dur:5500;loop:true;easing:easeOutQuad"
+      animation__o="property:material.opacity;from:.28;to:0;dur:5500;loop:true"></a-sphere>
+  </a-entity>
+  <!-- Ceiling smoke blanket -->
+  <a-plane position="0 3.25 -3" rotation="90 0 0" width="10" height="26"
+    material="color:#170e04;opacity:.68;transparent:true"
+    animation="property:material.opacity;from:.45;to:.85;dur:3000;dir:alternate;loop:true"></a-plane>
+
+  <!-- ══════════ FLOOR ARROWS (path) ══════════ -->
+  <a-entity>
+    <a-entity position="0 .012 -8"  rotation="-90 0 180"><a-triangle vertex-a="0 .42 0" vertex-b="-.26 -.22 0" vertex-c=".26 -.22 0" material="color:#00e676;opacity:.62;transparent:true" animation="property:material.opacity;from:.2;to:.88;dur:460;dir:alternate;loop:true"></a-triangle></a-entity>
+    <a-entity position="0 .012 -5"  rotation="-90 0 180"><a-triangle vertex-a="0 .42 0" vertex-b="-.26 -.22 0" vertex-c=".26 -.22 0" material="color:#00e676;opacity:.55;transparent:true" animation="property:material.opacity;from:.15;to:.8;dur:460;dir:alternate;loop:true;delay:80"></a-triangle></a-entity>
+    <a-entity position="0 .012 -2"  rotation="-90 0 180"><a-triangle vertex-a="0 .42 0" vertex-b="-.26 -.22 0" vertex-c=".26 -.22 0" material="color:#00e676;opacity:.5;transparent:true" animation="property:material.opacity;from:.12;to:.75;dur:460;dir:alternate;loop:true;delay:160"></a-triangle></a-entity>
+    <a-entity position="0 .012  1"  rotation="-90 0 180"><a-triangle vertex-a="0 .42 0" vertex-b="-.26 -.22 0" vertex-c=".26 -.22 0" material="color:#00e676;opacity:.48;transparent:true" animation="property:material.opacity;from:.1;to:.72;dur:460;dir:alternate;loop:true;delay:240"></a-triangle></a-entity>
+    <a-entity position="0 .012  4"  rotation="-90 0 180"><a-triangle vertex-a="0 .42 0" vertex-b="-.26 -.22 0" vertex-c=".26 -.22 0" material="color:#00e676;opacity:.5;transparent:true" animation="property:material.opacity;from:.12;to:.76;dur:460;dir:alternate;loop:true;delay:320"></a-triangle></a-entity>
+    <a-entity position="0 .012  7"  rotation="-90 0 180"><a-triangle vertex-a="0 .42 0" vertex-b="-.26 -.22 0" vertex-c=".26 -.22 0" material="color:#00e676;opacity:.54;transparent:true" animation="property:material.opacity;from:.15;to:.82;dur:460;dir:alternate;loop:true;delay:400"></a-triangle></a-entity>
+    <a-entity position="0 .012 10"  rotation="-90 0 180"><a-triangle vertex-a="0 .42 0" vertex-b="-.26 -.22 0" vertex-c=".26 -.22 0" material="color:#00e676;opacity:.58;transparent:true" animation="property:material.opacity;from:.18;to:.86;dur:460;dir:alternate;loop:true;delay:480"></a-triangle></a-entity>
+  </a-entity>
+
+  <!-- ══════════ DEBRIS ══════════ -->
+  <a-box position="-3.2 .42 -6" width="1.7" height=".08" depth=".9" rotation="0 20 68" material="color:#382008;roughness:.92"></a-box>
+  <a-box position="-2.8 .18 -5.2" width=".42" height=".42" depth=".42" rotation="36 10 84" material="color:#281505;roughness:.9"></a-box>
+  <a-plane position="-2.5 .01 -4" rotation="-90 18 0" width=".5" height=".72" material="color:#efe0c4;opacity:.7;transparent:true"></a-plane>
+  <a-plane position="2.8 .01 -7" rotation="-90 -12 0" width=".42" height=".58" material="color:#efe0c4;opacity:.58;transparent:true"></a-plane>
+  <a-box position="3.8 .78 -3" width=".6" height="1.56" depth=".68" material="color:#252525;roughness:.72"></a-box>
+  <!-- Fallen ceiling tile -->
+  <a-box position="1.2 .06 2" width="1.2" height=".05" depth=".9" rotation="4 -8 3" material="color:#2c1a0a;roughness:.9"></a-box>
+
+  <!-- ══════════ ELEVATOR (left wall, z≈-1) ══════════ -->
+  <a-entity position="-4.88 1.22 -1">
+    <a-box width=".1" height="2.55" depth="1.82" material="color:#1e1e1e;roughness:.3"></a-box>
+    <a-box position="0 0 -.46" width=".1" height="2.35" depth=".86" material="color:#333;roughness:.2"></a-box>
+    <a-box position="0 0  .46" width=".1" height="2.35" depth=".86" material="color:#333;roughness:.2"></a-box>
+    <a-text value="DO NOT USE" color="#ff2200" width="2.6" align="center" position="0 .38 -.08" rotation="0 90 0" font="https://cdn.aframe.io/fonts/Exo2Bold.fnt" animation="property:color;from:#ff0000;to:#ff9900;dur:480;dir:alternate;loop:true"></a-text>
+    <a-text value="ELEVATOR" color="#ff5500" width="2" align="center" position="0 -.08 -.08" rotation="0 90 0" font="https://cdn.aframe.io/fonts/Exo2Bold.fnt"></a-text>
+    <a-light type="point" color="#ff1a00" intensity=".7" distance="3.5" animation="property:intensity;from:.2;to:1.4;dur:520;dir:alternate;loop:true"></a-light>
+  </a-entity>
+
+  <!-- ══════════ EXIT SIGN ══════════ -->
+  <a-entity position="0 3.12 12">
+    <a-box width="2.4" height=".55" depth=".07" material="color:#002a00;roughness:.3;emissive:#001a00;emissiveIntensity:.5"></a-box>
+    <a-text value="EXIT ➡ STAIRS" color="#00e676" width="5.8" align="center" position="0 0 .05" font="https://cdn.aframe.io/fonts/Exo2Bold.fnt"
+      animation="property:color;from:#00e676;to:#69f0ae;dur:650;dir:alternate;loop:true"></a-text>
+    <a-light type="point" color="#00e676" intensity="1.5" distance="7"></a-light>
+  </a-entity>
+
+  <!-- ══════════ STAIRWELL DOOR ══════════ -->
+  <a-entity position="0 1.24 16.2">
+    <a-box width="1.8" height="2.52" depth=".16" material="color:#0e2e0e;roughness:.4"
+      animation="property:material.color;from:#0e2e0e;to:#1a4a1a;dur:900;dir:alternate;loop:true"></a-box>
+    <a-box width="1.92" height="2.64" depth=".1" position="0 0 -.06" material="color:#1a4020;roughness:.6"></a-box>
+    <a-text value="STAIRWELL" color="#00e676" width="3.4" align="center" position="0 .38 .1" font="https://cdn.aframe.io/fonts/Exo2Bold.fnt"></a-text>
+    <a-text value="PUSH TO EXIT" color="#69f0ae" width="2.5" align="center" position="0 -.06 .1" font="https://cdn.aframe.io/fonts/Exo2Bold.fnt"></a-text>
+    <!-- Door handle -->
+    <a-box position=".6 0 .1" width=".05" height=".28" depth=".06" material="color:#aaa;roughness:.3;metalness:.7"></a-box>
+    <a-light type="point" color="#00cc55" intensity="2.2" distance="12"></a-light>
+  </a-entity>
+
+  <!-- ══════════ STAIRWELL ROOM ══════════ -->
+  <a-box position="-3.3 1.7 16.2" width="3.4" height="3.4" depth=".16" material="color:#142414;roughness:1"></a-box>
+  <a-box position=" 3.5 1.7 16.2" width="3"   height="3.4" depth=".16" material="color:#142414;roughness:1"></a-box>
+  <a-box position="0 3.25 16.2" width="1.75" height=".42" depth=".16" material="color:#142414;roughness:1"></a-box>
+  <a-plane position="0 0 22"    rotation="-90 0 0" width="10" height="12" material="color:#162616;roughness:.9"></a-plane>
+  <a-plane position="0 3.4 22"  rotation="90 0 0"  width="10" height="12" material="color:#0e1a0e;roughness:1"></a-plane>
+  <a-box position="0 1.7 28"    width="10" height="3.4" depth=".16" material="color:#142414;roughness:1"></a-box>
+  <a-box position="-5 1.7 22"   width=".16" height="3.4" depth="12" material="color:#142414;roughness:1"></a-box>
+  <a-box position=" 5 1.7 22"   width=".16" height="3.4" depth="12" material="color:#142414;roughness:1"></a-box>
+
+  <!-- ══════════ STAIRCASE (10 steps) ══════════ -->
+  <a-entity id="stairs" position="0 0 17.5">
+    <a-box position="0  .10  0"    width="9" height=".2" depth=".56" material="color:#1e3a1e;roughness:.8"></a-box>
+    <a-box position="0  .30 -.56"  width="9" height=".2" depth=".56" material="color:#1a341a;roughness:.8"></a-box>
+    <a-box position="0  .50 -1.12" width="9" height=".2" depth=".56" material="color:#1e3a1e;roughness:.8"></a-box>
+    <a-box position="0  .70 -1.68" width="9" height=".2" depth=".56" material="color:#1a341a;roughness:.8"></a-box>
+    <a-box position="0  .90 -2.24" width="9" height=".2" depth=".56" material="color:#1e3a1e;roughness:.8"></a-box>
+    <a-box position="0 1.10 -2.80" width="9" height=".2" depth=".56" material="color:#1a341a;roughness:.8"></a-box>
+    <a-box position="0 1.30 -3.36" width="9" height=".2" depth=".56" material="color:#1e3a1e;roughness:.8"></a-box>
+    <a-box position="0 1.50 -3.92" width="9" height=".2" depth=".56" material="color:#1a341a;roughness:.8"></a-box>
+    <a-box position="0 1.70 -4.48" width="9" height=".2" depth=".56" material="color:#1e3a1e;roughness:.8"></a-box>
+    <a-box position="0 1.90 -5.04" width="9" height=".2" depth=".56" material="color:#1a341a;roughness:.8"></a-box>
+    <!-- Risers -->
+    <a-box position="0  .20 -.28"  width="9" height=".2" depth=".05" material="color:#162a16"></a-box>
+    <a-box position="0  .40 -.84"  width="9" height=".2" depth=".05" material="color:#162a16"></a-box>
+    <a-box position="0  .60 -1.40" width="9" height=".2" depth=".05" material="color:#162a16"></a-box>
+    <a-box position="0  .80 -1.96" width="9" height=".2" depth=".05" material="color:#162a16"></a-box>
+    <a-box position="0 1.00 -2.52" width="9" height=".2" depth=".05" material="color:#162a16"></a-box>
+    <!-- Railings -->
+    <a-box position="-4.55 1.02 -2.52" width=".07" height="2.04" depth=".07" material="color:#2a6a2a"></a-box>
+    <a-box position=" 4.55 1.02 -2.52" width=".07" height="2.04" depth=".07" material="color:#2a6a2a"></a-box>
+    <a-box position="0 2.0 -2.52" width="9.1" height=".07" depth=".07" rotation="0 0 10.5" material="color:#33aa44"></a-box>
+    <!-- Safety tape on edges -->
+    <a-box position="-4.4 .12 0"    width=".2" height=".24" depth=".56" material="color:#ccaa00;roughness:.6"></a-box>
+    <a-box position=" 4.4 .12 0"    width=".2" height=".24" depth=".56" material="color:#ccaa00;roughness:.6"></a-box>
+    <!-- Label -->
+    <a-text value="▼ DESCEND TO GROUND FLOOR ▼" color="#00e676" width="7.5" align="center" position="0 2.6 -2.5" font="https://cdn.aframe.io/fonts/Exo2Bold.fnt"
+      animation="property:color;from:#00e676;to:#69f0ae;dur:700;dir:alternate;loop:true"></a-text>
+  </a-entity>
+
+  <!-- Safe zone trigger -->
+  <a-box position="0 .02 17" width="10" height=".04" depth="4"
+    material="color:#003300;opacity:.3;transparent:true"
+    animation="property:material.opacity;from:.12;to:.45;dur:1100;dir:alternate;loop:true"></a-box>
+
+  <!-- ══════════ LIGHTING ══════════ -->
+  <a-light type="ambient" color="#110600" intensity=".5"></a-light>
+  <!-- Flickering corridor lights -->
+  <a-light type="point" position="0 3.2 -5" color="#ff7722" intensity=".55" distance="13"
+    animation="property:intensity;from:.05;to:1.1;dur:95;dir:alternate;loop:true;easing:linear"></a-light>
+  <a-light type="point" position="0 3.2  3" color="#ff8833" intensity=".45" distance="11"
+    animation="property:intensity;from:0;to:.9;dur:125;dir:alternate;loop:true;easing:linear;delay:40"></a-light>
+  <!-- Green safe zone lights -->
+  <a-light type="point" position=" 3 2.8 18" color="#44ff88" intensity="1.1" distance="8"></a-light>
+  <a-light type="point" position="-3 2.8 18" color="#44ff88" intensity=".9"  distance="7"></a-light>
+
+  <a-sky color="#030100"></a-sky>
+</a-scene>
+
+<!-- ═══════════════════════ UI ═══════════════════════ -->
+<div id="atmo">
+  <div id="vignette"></div>
+  <div id="smoke-top"></div>
+  <div id="smoke-floor"></div>
+  <div id="heat-left"></div>
+  <div id="heat-right"></div>
+  <div id="heat-back"></div>
+  <div id="crawl-overlay"></div>
+  <div id="hit-flash"></div>
+</div>
+<div id="grain"></div>
+
+<!-- BANNER -->
+<div id="banner">
+  <div class="b-dot"></div>
+  <div class="b-label">⚠ Fire Alert</div>
+  <div class="b-sep"></div>
+  <div class="b-msg">Evacuate Immediately — All Personnel</div>
+  <div class="b-right">
+    <div class="b-timer-wrap">
+      <div class="b-timer-label">ELAPSED</div>
+      <div id="timer-val">00:00</div>
+    </div>
+    <div class="b-floor">
+      <div class="b-floor-label">FLOOR</div>
+      <div class="b-floor-num">07</div>
+    </div>
+  </div>
+</div>
+
+<!-- CRAWL STATUS -->
+<div id="crawl-status">
+  <div class="cs-dot"></div>
+  <div class="cs-text">Crawling — Below Smoke Layer</div>
+  <div class="cs-sub">Release SPACE to stand</div>
+</div>
+
+<!-- LEFT PANEL -->
+<div id="left-panel">
+  <div class="lp-card">
+    <div class="lp-label">Current Floor</div>
+    <div class="lp-value">07</div>
+    <div class="lp-sub">Target: Ground</div>
+  </div>
+  <div id="lift-badge">
+    <span class="lb-icon">🚫</span>
+    <div class="lb-text">Do Not Use<br>Elevator</div>
+  </div>
+</div>
+
+<!-- RIGHT PANEL -->
+<div id="right-panel">
+  <div class="rp-head"><div class="rp-head-title">Evacuation Guide</div></div>
+  <div class="tip-row"><div class="tip-num">1</div><div class="tip-text"><b>Fire is BEHIND</b> — Move forward at all times.</div></div>
+  <div class="tip-row"><div class="tip-num">2</div><div class="tip-text"><b>Side Fires</b> — Dodge left/right fires. Stay centred.</div></div>
+  <div class="tip-row"><div class="tip-num">3</div><div class="tip-text"><b>Crawl (SPACE)</b> — Hold to duck under toxic smoke.</div></div>
+  <div class="tip-row"><div class="tip-num">4</div><div class="tip-text"><b>No Elevator</b> — It's on your left. Never use lifts in fire.</div></div>
+  <div class="tip-row"><div class="tip-num">5</div><div class="tip-text"><b>Green Arrows</b> — Follow the floor path to stairwell.</div></div>
+  <div class="tip-row"><div class="tip-num">6</div><div class="tip-text"><b>Handrail</b> — Grip railing on stairs. Descend calmly.</div></div>
+</div>
+
+<!-- LEFT / RIGHT PROXIMITY WARNINGS -->
+<div class="prox-warn" id="warn-left">
+  <span class="pw-icon">🔥</span>
+  <div class="pw-text">Fire Left!<br>Move Right →</div>
+</div>
+<div class="prox-warn" id="warn-right">
+  <span class="pw-icon">🔥</span>
+  <div class="pw-text">Fire Right!<br>← Move Left</div>
+</div>
+
+<!-- BOTTOM HUD -->
+<div id="bottom-hud">
+  <div id="dir-indicator">
+    <div class="di-arrow" id="dir-arrow">🟢</div>
+    <div id="dir-text">Head to Stairwell</div>
+  </div>
+  <div id="ctrl-row">
+    <div class="ctrl-chip"><kbd>WASD</kbd> Move</div>
+    <div class="ctrl-chip"><kbd>Mouse</kbd> Look</div>
+    <div class="ctrl-chip"><kbd>SPACE</kbd> Crawl</div>
+  </div>
+</div>
+
+<!-- CONTEXTUAL TIP CARD (centre popup) -->
+<div id="tip-card">
+  <div class="tc-stripe" id="tc-stripe"></div>
+  <div class="tc-body">
+    <div class="tc-tag" id="tc-tag">Tip</div>
+    <span class="tc-icon" id="tc-icon">🔥</span>
+    <div class="tc-title" id="tc-title">Warning</div>
+    <div class="tc-desc" id="tc-desc">Stay calm and follow instructions.</div>
+    <div class="tc-key" id="tc-key" style="display:none">
+      <kbd id="tc-kbd">SPACE</kbd><span id="tc-kbd-label">to crawl</span>
+    </div>
+    <div class="tc-dismiss">— Press any key or wait to dismiss —</div>
+  </div>
+</div>
+
+<!-- WIN SCREEN -->
+<div id="win">
+  <div class="win-stripe"></div>
+  <div style="font-size:64px;margin-top:0">🏃‍♂️</div>
+  <h1>Evacuated</h1>
+  <div class="sub">Stairwell Reached</div>
+  <div id="win-time">00:00</div>
+  <div id="win-score">Evacuation Complete</div>
+  <button id="win-btn" onclick="location.reload()">Try Again</button>
+  <div class="win-stripe b"></div>
+</div>
+
+<script>
+// ════════════════════════════════════════════
+// CONFIG
+// ════════════════════════════════════════════
+const STAND_H   = 1.62;
+const CRAWL_H   = 0.36;
+const SPEED_RUN = 0.072;
+const SPEED_CRAWL = 0.030;
+
+// Fire danger zones: {z range, side ('left'|'right'), x danger threshold}
+// Player x: negative = left, positive = right
+// Left fires at x=-4.6, danger if player x < -2.4
+// Right fires at x=+4.6, danger if player x > +2.4
+const LEFT_FIRE_ZONES  = [ [-11,-9], [-6,-3], [-1,1], [5,7] ];
+const RIGHT_FIRE_ZONES = [ [-8,-6], [-2,0], [4,6] ];
+const FIRE_DANGER_X_L  = -2.2;  // if px < this AND in a left zone → danger
+const FIRE_DANGER_X_R  =  2.2;  // if px > this AND in a right zone → danger
+const HIT_DISTANCE     = -2.9;  // instant "burn" if closer
+
+// ════════════════════════════════════════════
+// STATE
+// ════════════════════════════════════════════
+const keys  = {};
+let isCrawling = false;
+let won        = false;
+let seconds    = 0;
+let health     = 100;
+let tipQueue   = [];
+let tipActive  = false;
+let tipTimeout = null;
+
+// Which contextual tips have been shown (by id)
+const shownTips = new Set();
+
+// ════════════════════════════════════════════
+// INPUT
+// ════════════════════════════════════════════
+document.addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if(e.code === 'Space') { e.preventDefault(); setCrawl(true); }
+  // dismiss tip card on any key
+  if(tipActive) dismissTip();
+});
+document.addEventListener('keyup', e => {
+  keys[e.code] = false;
+  if(e.code === 'Space') setCrawl(false);
+});
+
+function setCrawl(v) {
+  isCrawling = v;
+  document.getElementById('crawl-status').classList.toggle('on', v);
+  document.getElementById('crawl-overlay').classList.toggle('on', v);
+}
+
+// ════════════════════════════════════════════
+// CONTEXTUAL TIP SYSTEM
+// ════════════════════════════════════════════
+const TIPS = {
+  intro: {
+    tag:'⚠ Situation', icon:'🔥', title:'Building On Fire!',
+    desc:'Fire is raging BEHIND you. Move forward toward the green arrows. Reach the stairwell to evacuate.',
+    kbd:'W', kbdLabel:'to move forward', green:false
+  },
+  leftFire: {
+    tag:'⚠ Hazard Detected', icon:'🔥', title:'Fire on Your Left!',
+    desc:'Flames are burning along the left wall. Move to the RIGHT side of the corridor to avoid heat and burns.',
+    kbd:'D', kbdLabel:'move right', green:false
+  },
+  rightFire: {
+    tag:'⚠ Hazard Detected', icon:'🔥', title:'Fire on Your Right!',
+    desc:'Flames are burning along the right wall. Move to the LEFT side of the corridor to avoid heat and burns.',
+    kbd:'A', kbdLabel:'move left', green:false
+  },
+  crawlZone: {
+    tag:'🌫 Smoke Alert', icon:'😮‍💨', title:'Heavy Smoke Ahead!',
+    desc:'Toxic smoke is accumulating near the ceiling. Drop low and crawl to breathe cleaner air near the floor.',
+    kbd:'SPACE', kbdLabel:'to crawl', green:false
+  },
+  elevator: {
+    tag:'⚠ Warning', icon:'🚫', title:'Never Use the Elevator!',
+    desc:'Elevator shafts become chimneys in fires. The power may cut out, trapping you. Use the STAIRWELL only.',
+    kbd:null, green:false
+  },
+  stairsDoor: {
+    tag:'✅ Exit Found', icon:'🚪', title:'Stairwell Ahead!',
+    desc:'You can see the stairwell door. Push through and descend to the ground floor using the handrail.',
+    kbd:'W', kbdLabel:'to reach exit', green:true
+  },
+  stairs: {
+    tag:'✅ Almost Safe', icon:'🪜', title:'Use the Handrail!',
+    desc:'Grip the railing firmly. Descend one step at a time. Do not rush — a fall here could be fatal.',
+    kbd:null, green:true
+  }
+};
+
+function showTip(id, delay=0) {
+  if(shownTips.has(id)) return;
+  shownTips.add(id);
+  const t = TIPS[id];
+  if(!t) return;
+  setTimeout(() => {
+    if(won) return;
+    const card = document.getElementById('tip-card');
+    document.getElementById('tc-tag').textContent   = t.tag;
+    document.getElementById('tc-tag').className     = 'tc-tag' + (t.green ? ' green' : '');
+    document.getElementById('tc-icon').textContent  = t.icon;
+    document.getElementById('tc-title').textContent = t.title;
+    document.getElementById('tc-title').className   = 'tc-title' + (t.green ? ' green' : '');
+    document.getElementById('tc-desc').textContent  = t.desc;
+    document.getElementById('tc-desc').className    = 'tc-desc' + (t.green ? ' green' : '');
+    document.getElementById('tc-stripe').className  = 'tc-stripe' + (t.green ? ' green' : '');
+    const keyEl = document.getElementById('tc-key');
+    if(t.kbd) {
+      keyEl.style.display = 'inline-flex';
+      document.getElementById('tc-kbd').textContent = t.kbd;
+      document.getElementById('tc-kbd-label').textContent = t.kbdLabel;
+    } else {
+      keyEl.style.display = 'none';
+    }
+    card.classList.add('show');
+    tipActive = true;
+    // auto-dismiss after 5s
+    tipTimeout = setTimeout(dismissTip, 5000);
+  }, delay);
+}
+
+function dismissTip() {
+  clearTimeout(tipTimeout);
+  document.getElementById('tip-card').classList.remove('show');
+  tipActive = false;
+}
+
+// ════════════════════════════════════════════
+// MOVEMENT LOOP
+// ════════════════════════════════════════════
+const rig = document.getElementById('rig');
+const cam = document.getElementById('cam');
+
+function inZone(z, zones) {
+  return zones.some(([a,b]) => z >= a && z <= b);
+}
+
+function loop() {
+  if(won) return;
+
+  // Smooth camera height
+  const cPos  = cam.getAttribute('position');
+  const tH    = isCrawling ? CRAWL_H : STAND_H;
+  cam.setAttribute('position', {x:0, y: cPos.y + (tH - cPos.y) * 0.14, z:0});
+
+  const speed = isCrawling ? SPEED_CRAWL : SPEED_RUN;
+  let {x:px, z:pz} = rig.getAttribute('position');
+
+  // Yaw from look-controls
+  const lc  = cam.components['look-controls'];
+  const yaw = lc && lc.yawObject ? lc.yawObject.rotation.y : 0;
+
+  if(keys['KeyW']||keys['ArrowUp'])    { px += -Math.sin(yaw)*speed; pz += -Math.cos(yaw)*speed; }
+  if(keys['KeyS']||keys['ArrowDown'])  { px +=  Math.sin(yaw)*speed; pz +=  Math.cos(yaw)*speed; }
+  if(keys['KeyA']||keys['ArrowLeft'])  { px += -Math.cos(yaw)*speed; pz +=  Math.sin(yaw)*speed; }
+  if(keys['KeyD']||keys['ArrowRight']) { px +=  Math.cos(yaw)*speed; pz += -Math.sin(yaw)*speed; }
+
+  // ── COLLISION with side fire zones ──
+  let hitLeft  = false, hitRight = false;
+  let nearLeft = false, nearRight = false;
+
+  if(inZone(pz, LEFT_FIRE_ZONES)) {
+    if(px < HIT_DISTANCE)       hitLeft  = true;
+    else if(px < FIRE_DANGER_X_L) nearLeft = true;
+  }
+  if(inZone(pz, RIGHT_FIRE_ZONES)) {
+    if(px > -HIT_DISTANCE)      hitRight  = true;
+    else if(px > FIRE_DANGER_X_R) nearRight = true;
+  }
+
+  // Push player away if too close to fire
+  if(hitLeft)  { px = HIT_DISTANCE + 0.05; flashHit(); }
+  if(hitRight) { px = -HIT_DISTANCE - 0.05; flashHit(); }
+
+  // Wall boundaries
+  px = Math.max(-4.4, Math.min(4.4, px));
+  pz = Math.max(-15.5, Math.min(24,  pz));
+  rig.setAttribute('position', {x:px, y:0, z:pz});
+
+  // ── HEAT SIDE OVERLAYS ──
+  document.getElementById('heat-left').style.opacity  = nearLeft  ? '1' : hitLeft  ? '1' : '0';
+  document.getElementById('heat-right').style.opacity = nearRight ? '1' : hitRight ? '1' : '0';
+
+  // ── PROXIMITY WARNINGS ──
+  document.getElementById('warn-left').classList.toggle('on',  nearLeft  && !hitLeft);
+  document.getElementById('warn-right').classList.toggle('on', nearRight && !hitRight);
+
+  // ── DIRECTION TEXT ──
+  updateDir(pz);
+
+  // ── CONTEXTUAL TIPS (z-based triggers) ──
+  if(pz > -13  && !shownTips.has('intro'))       showTip('intro', 800);
+  if(pz > -6   && !shownTips.has('leftFire'))    showTip('leftFire');
+  if(pz > -4   && !shownTips.has('rightFire'))   showTip('rightFire');
+  if(pz > 0    && !shownTips.has('crawlZone'))   showTip('crawlZone');
+  if(pz > -1   && !shownTips.has('elevator'))    showTip('elevator', 200);
+  if(pz > 10   && !shownTips.has('stairsDoor'))  showTip('stairsDoor');
+  if(pz > 15   && !shownTips.has('stairs'))      showTip('stairs');
+
+  // ── WIN ──
+  if(pz > 17) triggerWin();
+
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+// ════════════════════════════════════════════
+// HELPERS
+// ════════════════════════════════════════════
+let hitFlashT = null;
+function flashHit() {
+  const f = document.getElementById('hit-flash');
+  f.classList.add('on');
+  clearTimeout(hitFlashT);
+  hitFlashT = setTimeout(() => f.classList.remove('on'), 120);
+}
+
+function updateDir(z) {
+  const t = document.getElementById('dir-text');
+  const a = document.getElementById('dir-arrow');
+  if(z < -8)       { t.textContent = 'Run! Fire is Close!';     a.textContent = '🔴'; }
+  else if(z < -2)  { t.textContent = 'Keep Moving Forward';     a.textContent = '🟡'; }
+  else if(z < 8)   { t.textContent = 'Stairwell Ahead';         a.textContent = '🟢'; }
+  else if(z < 14)  { t.textContent = 'Almost There — Push Door'; a.textContent = '🟢'; }
+  else             { t.textContent = 'Enter Stairwell — Go Down'; a.textContent = '✅'; }
+}
+
+function triggerWin() {
+  won = true;
+  clearInterval(timerInt);
+  const m = String(Math.floor(seconds/60)).padStart(2,'0');
+  const s = String(seconds%60).padStart(2,'0');
+  document.getElementById('win-time').textContent = `${m}:${s}`;
+  const rating = seconds < 40 ? '⭐⭐⭐ Expert Evacuee'
+               : seconds < 70 ? '⭐⭐ Good Response'
+               :                '⭐ Evacuated Safely';
+  document.getElementById('win-score').textContent = rating;
+  document.getElementById('win').style.display = 'flex';
+}
+
+// ════════════════════════════════════════════
+// TIMER
+// ════════════════════════════════════════════
+const timerInt = setInterval(() => {
+  if(won) return;
+  seconds++;
+  const m = String(Math.floor(seconds/60)).padStart(2,'0');
+  const s = String(seconds%60).padStart(2,'0');
+  const tv = document.getElementById('timer-val');
+  tv.textContent = m+':'+s;
+  if(seconds > 60) { tv.style.color='#ff6622'; tv.style.textShadow='0 0 10px rgba(255,80,0,0.6)'; }
+}, 1000);
+
+// Intro alarm flash
+let fc=0;
+const fi=setInterval(()=>{ document.body.style.background=fc%2?'#000':'#380000'; if(++fc>10){clearInterval(fi);document.body.style.background='#000';} },150);
+</script>
+</body>
+</html>
